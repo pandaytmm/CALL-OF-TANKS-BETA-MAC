@@ -1,4 +1,5 @@
 [app]
+source.dir = .
 main.filename = tank_oyunu.py
 title = Tank Savasi
 package.name = tanksavasi
