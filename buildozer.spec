@@ -1,4 +1,5 @@
 [app]
+main.filename = tank_oyunu.py
 title = Tank Savasi
 package.name = tanksavasi
 package.domain = org.tanksavasi
