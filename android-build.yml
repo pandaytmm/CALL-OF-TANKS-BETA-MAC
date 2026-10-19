@@ -22,7 +22,7 @@ jobs:
         sudo apt-get install -y \
             git \
             python3-pip \
-            build-python \
+            build-essential \
             libffi-dev \
             libssl-dev \
             zlib1g-dev \
