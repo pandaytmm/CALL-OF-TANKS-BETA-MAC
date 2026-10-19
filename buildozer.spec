@@ -1,4 +1,5 @@
 [app]
+android.ndk = 25b
 source.dir = .
 main.filename = tank_oyunu.py
 title = Tank Savasi
