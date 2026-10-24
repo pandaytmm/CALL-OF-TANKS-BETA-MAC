@@ -15,6 +15,11 @@ import uuid
 
 import pygame
 
+__version__ = "1.0.0"
+# python-for-android ortamini algila.
+ANDROID = (sys.platform == "android" or bool(os.environ.get("ANDROID_ARGUMENT"))
+           or bool(os.environ.get("ANDROID_PRIVATE")))
+
 pygame.init()
 window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
 SW, SH = window.get_size()
@@ -66,11 +71,14 @@ else:
 def get_save_dir():
     """Yazilabilir bir kayit klasoru bulur (AppData / Application Support), olmazsa oyunun klasoru."""
     home = os.path.expanduser("~")
-    if sys.platform == "darwin":                      # macOS
+    if ANDROID:
+        # Android uygulamasinin yazilabilir, uygulamaya ozel klasoru.
+        base = os.environ.get("ANDROID_PRIVATE") or home
+    elif sys.platform == "darwin":                    # macOS
         base = os.path.join(home, "Library", "Application Support")
     elif sys.platform.startswith("win"):              # Windows
         base = os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
-    else:                                             # Linux
+    else:                                              # Linux
         base = os.environ.get("XDG_DATA_HOME") or os.path.join(home, ".local", "share")
     for d in (os.path.join(base, "TankSavasi"), BASE_DIR):
         try:
@@ -272,15 +280,54 @@ TANKS = [
          spec=make_spec((232, 192, 62), (112, 86, 22), (34, 34, 40), hl=1.12, hw=1.15, tur=1.15,
                         barrel_len=46, barrel_w=8, twin=True)),
 ]
-TANK_BY_ID = {t["id"]: t for t in TANKS}
+MAX_TANK_LEVEL = 10
 
-STAT_KEYS = ["max_hp", "hp", "speed", "cooldown", "dmg", "bullet_speed", "shots", "bounces", "regen", "shield"]
+TANKS.extend([
+    dict(id="kobra", name="Kobra", price=7500, hp=140, speed=300, cooldown=0.30, dmg=28,
+         bullet_speed=900, shots=1, regen=0.0, desc="Mermileri düşmanları deler",
+         preset={"pierce": 1},
+         spec=make_spec((38, 156, 96), (16, 72, 44), (255, 232, 70), hl=1.05, hw=0.92, tur=0.98,
+                        barrel_len=50, barrel_w=6)),
+    dict(id="vampir", name="Vampir", price=12000, hp=170, speed=265, cooldown=0.38, dmg=30,
+         bullet_speed=760, shots=1, regen=0.0, desc="Verdiği hasarla can kazanır",
+         preset={"lifesteal": 0.08},
+         spec=make_spec((132, 30, 62), (60, 14, 32), (235, 235, 240), hw=1.05, tur=1.05,
+                        barrel_len=38, barrel_w=7)),
+    dict(id="havan", name="Patlatıcı", price=16000, hp=210, speed=225, cooldown=0.70, dmg=55,
+         bullet_speed=680, shots=1, regen=0.0, desc="Mermisi patlar, çevreye hasar verir",
+         preset={"splash": 0.5},
+         spec=make_spec((168, 98, 38), (86, 46, 16), (255, 205, 80), hl=1.05, hw=1.15, tur=1.12,
+                        barrel_len=34, barrel_w=13)),
+    dict(id="titan", name="Titan", price=22000, hp=450, speed=175, cooldown=0.60, dmg=46,
+         bullet_speed=720, shots=2, regen=2.0, desc="Dev gibi dayanıklı, kalkanlı",
+         preset={"shield": 3},
+         spec=make_spec((92, 112, 152), (44, 54, 82), (255, 200, 60), hl=1.2, hw=1.3, tur=1.25,
+                        barrel_len=40, barrel_w=10, twin=True)),
+    dict(id="hayalet", name="Hayalet", price=30000, hp=170, speed=410, cooldown=0.25, dmg=26,
+         bullet_speed=950, shots=2, regen=0.0, desc="Seken çift mermi, ışık hızında",
+         preset={"bounces": 2},
+         spec=make_spec((212, 226, 238), (108, 128, 150), (80, 222, 255), hl=0.95, hw=0.85, tur=0.9,
+                        barrel_len=52, barrel_w=5, twin=True)),
+])
+
+# Gizli tank (ADMINTANKS koduyla acilir): her sey full
+ADMIN_TANK = dict(
+    id="admin", name="ADMIN TANK", price=0, hp=2000, speed=460, cooldown=0.12, dmg=150,
+    bullet_speed=1400, shots=5, regen=15.0, desc="Yönetici tankı: her şey full",
+    preset={"bounces": 4, "pierce": 3, "lifesteal": 0.4, "splash": 1.4, "shield": 9,
+            "shock": 4, "crit": 0.5, "gold": 1.0, "slow": 3, "burn": 3},
+    spec=make_spec((24, 24, 32), (214, 170, 34), (255, 60, 60), hl=1.2, hw=1.2, tur=1.2,
+                   barrel_len=58, barrel_w=9, twin=True))
+TANK_BY_ID = {t["id"]: t for t in TANKS + [ADMIN_TANK]}
+
+STAT_KEYS = ["max_hp", "hp", "speed", "cooldown", "dmg", "bullet_speed", "shots", "bounces", "regen", "shield",
+            "pierce", "lifesteal", "splash", "shock", "crit", "gold", "slow", "burn"]
 
 
 # ---------------- kayit sistemi ----------------
 def default_data():
     return {"money": 0, "owned": ["acemi"], "selected": "acemi", "best_level": 0,
-            "best_score": 0, "run": None, "machine": "", "last_ip": ""}
+            "best_score": 0, "run": None, "machine": "", "last_ip": "", "levels": {}, "god": False}
 
 
 def get_machine_id():
@@ -332,6 +379,10 @@ def load_game():
             d["best_level"] = int(raw.get("best_level", 0))
             d["best_score"] = int(raw.get("best_score", 0))
             d["last_ip"] = str(raw.get("last_ip", ""))[:60]
+            lv = raw.get("levels", {})
+            if isinstance(lv, dict):
+                d["levels"] = {k: max(1, min(MAX_TANK_LEVEL, int(v))) for k, v in lv.items() if k in TANK_BY_ID}
+            d["god"] = bool(raw.get("god", False))
             run = raw.get("run")
             if isinstance(run, dict) and run.get("tank") in TANK_BY_ID:
                 d["run"] = run
@@ -683,6 +734,13 @@ class Bullet:
         self.bounces = bounces
         self.r = {"player": 6, "boss": 9}.get(owner, 5)
         self.life = 4.0
+        self.pierce = 0          # kac dusmanin icinden gecebilir
+        self.splash = 0.0        # carpinca cevreye verdigi hasar orani
+        self.lifesteal = 0.0     # verdigi hasarin kac kadari can olur
+        self.hit_ids = set()
+        self.slow = 0
+        self.burn = 0
+        self.crit = False
 
     def update(self, dt):
         self.x += self.vx * dt
@@ -705,7 +763,7 @@ class Bullet:
                 self.life = 0
 
     def draw(self, surf):
-        col = BULLET_COLORS[self.owner]
+        col = (255, 120, 190) if self.crit else BULLET_COLORS[self.owner]
         surf.blit(get_glow(col), (int(self.x - 22), int(self.y - 22)))
         tail = (self.x - self.vx * 0.025, self.y - self.vy * 0.025)
         pygame.draw.line(surf, shade(col, 0.8), tail, (self.x, self.y), self.r * 2 - 2)
@@ -715,7 +773,7 @@ class Bullet:
 
 # ---------------- oyuncu ----------------
 class Player:
-    def __init__(self, tank, pid=0, name=""):
+    def __init__(self, tank, pid=0, name="", level=1):
         self.tank = tank
         self.spec = tank["spec"]
         self.r = self.spec["r"]
@@ -724,17 +782,32 @@ class Player:
         self.x, self.y = W / 2, H / 2
         self.body_a = -math.pi / 2
         self.turret_a = -math.pi / 2
-        self.max_hp = tank["hp"]
-        self.hp = tank["hp"]
-        self.speed = tank["speed"]
-        self.cooldown = tank["cooldown"]
+        lv = 1 if tank["id"] == "admin" else max(1, min(MAX_TANK_LEVEL, int(level)))
+        self.level = lv
+        ls = leveled_stats(tank, lv)
+        self.max_hp = ls["hp"]
+        self.hp = ls["hp"]
+        self.speed = ls["speed"]
+        self.cooldown = ls["cooldown"]
         self.timer = 0
-        self.dmg = tank["dmg"]
+        self.dmg = ls["dmg"]
         self.bullet_speed = tank["bullet_speed"]
         self.shots = tank["shots"]
         self.bounces = 0
         self.regen = tank["regen"]
         self.shield = 0
+        self.pierce = 0
+        self.splash = 0.0
+        self.lifesteal = 0.0
+        self.shock = 0           # Sok Dalgasi seviyesi
+        self.crit = 0.0          # kritik vurus sansi
+        self.gold = 0.0          # para bonusu
+        self.slow = 0            # yavaslatici mermi seviyesi
+        self.burn = 0            # yanici mermi seviyesi
+        self.shock_t = 3.0
+        for k, v in tank.get("preset", {}).items():     # tanka ozel yetenekler
+            setattr(self, k, v)
+        self.hp = self.max_hp
         self.recoil = 0.0
         self.flash = 0.0
         self.tread = 0.0
@@ -783,7 +856,14 @@ class Player:
                 perp = self.turret_a + math.pi / 2
                 bx = self.x + math.cos(self.turret_a) * muzzle + math.cos(perp) * k * 11
                 by = self.y + math.sin(self.turret_a) * muzzle + math.sin(perp) * k * 11
-                bullets.append(Bullet(bx, by, a, self.bullet_speed, self.dmg, "player", self.bounces, self.pid))
+                bl = Bullet(bx, by, a, self.bullet_speed, self.dmg, "player", self.bounces, self.pid)
+                bl.pierce, bl.splash, bl.lifesteal = self.pierce, self.splash, self.lifesteal
+                bl.slow, bl.burn = self.slow, self.burn
+                if self.crit > 0 and random.random() < self.crit:      # Kritik Vurus
+                    bl.dmg *= 2
+                    bl.crit = True
+                    bl.r += 2
+                bullets.append(bl)
             self.recoil = 8
             fx_sparks(self.x + math.cos(self.turret_a) * (muzzle + 4),
                       self.y + math.sin(self.turret_a) * (muzzle + 4),
@@ -795,6 +875,8 @@ class Player:
     def hit(self, dmg):
         global shake, hurt
         self.flash = 0.12
+        if self.pid == my_pid and god_active():      # GODMODE: olumsuzluk
+            return
         if self.shield > 0:
             self.shield -= 1
             fx_sparks(self.x, self.y, (110, 190, 255), 8, 200, 0.3)
@@ -875,8 +957,12 @@ class Enemy:
         self.recoil = 0.0
         self.flash = 0.0
         self.tread = 0.0
+        self.slow_t = 0.0
+        self.burn_t = 0.0
+        self.burn_dps = 0.0
 
     def update(self, dt, players, bullets):
+        self.slow_t = max(0.0, self.slow_t - dt)
         self.recoil = max(0.0, self.recoil - 40 * dt)
         self.flash = max(0.0, self.flash - dt)
         alive = [p for p in players if p.hp > 0]
@@ -892,9 +978,10 @@ class Enemy:
             mx, my = dx / dist, dy / dist
         else:
             mx, my = -dy / dist * self.strafe, dx / dist * self.strafe
-        self.x += mx * self.speed * dt
-        self.y += my * self.speed * dt
-        self.tread += self.speed * dt / self.scale
+        spd = self.speed * (0.5 if self.slow_t > 0 else 1.0)
+        self.x += mx * spd * dt
+        self.y += my * spd * dt
+        self.tread += spd * dt / self.scale
         target = math.atan2(my, mx)
         self.body_a += max(-4 * dt, min(4 * dt, angle_diff(self.body_a, target)))
         self.turret_a += max(-5 * dt, min(5 * dt, angle_diff(self.turret_a, ang)))
@@ -938,6 +1025,14 @@ def up_shield(p): p.shield += 3
 def up_repair(p): p.hp = p.max_hp
 def up_sharp(p): p.dmg *= 1.15; p.bullet_speed *= 1.08
 def up_iron(p): p.max_hp += 20; p.regen += 0.5
+def up_pierce(p): p.pierce += 1
+def up_lifesteal(p): p.lifesteal += 0.05
+def up_splash(p): p.splash += 0.35
+def up_shock(p): p.shock += 1
+def up_crit(p): p.crit += 0.10
+def up_gold(p): p.gold += 0.25
+def up_slow(p): p.slow += 1
+def up_burn(p): p.burn += 1
 
 
 UPGRADES = [
@@ -953,6 +1048,22 @@ UPGRADES = [
     ("Tam Tamir", "Canını anında doldurur", up_repair, lambda p: p.hp < p.max_hp, (255, 150, 190)),
     ("Keskin Nişan", "Hasar +%15 ve mermi hızı +%8", up_sharp, lambda p: True, (255, 180, 100)),
     ("Demir Deri", "+20 maksimum can ve +0.5 yenilenme", up_iron, lambda p: True, (170, 170, 190)),
+    ("Delici Mermi", "Mermiler +1 düşmanın içinden geçer (en fazla 3)", up_pierce,
+     lambda p: p.pierce < 3, (120, 255, 120)),
+    ("Can Çalma", "Verdiğin hasarın %5'i kadar can kazanırsın (en fazla %40)", up_lifesteal,
+     lambda p: p.lifesteal < 0.4, (255, 90, 130)),
+    ("Patlayıcı Mermi", "İsabette çevredeki düşmanlara %35 hasar (3 kata kadar birikir)", up_splash,
+     lambda p: p.splash < 1.4, (255, 150, 60)),
+    ("Şok Dalgası", "Birkaç saniyede bir çevrene elektrik dalgası yayar ve düşmanlara hasar verir (en fazla 4)",
+     up_shock, lambda p: p.shock < 4, (110, 200, 255)),
+    ("Kritik Vuruş", "%10 ihtimalle 2 kat hasar verirsin (en fazla %50)", up_crit,
+     lambda p: p.crit < 0.5, (255, 120, 200)),
+    ("Altın Avcısı", "Düşman öldürmekten %25 daha fazla para kazanırsın (en fazla %100)", up_gold,
+     lambda p: p.gold < 1.0, (255, 215, 60)),
+    ("Yavaşlatıcı Mermi", "Vurduğun düşman bir süre yarı hızda hareket eder (en fazla 3)", up_slow,
+     lambda p: p.slow < 3, (150, 170, 255)),
+    ("Yanıcı Mermi", "Vurduğun düşman yanar ve 3 saniye boyunca sürekli hasar alır (en fazla 3)", up_burn,
+     lambda p: p.burn < 3, (255, 115, 40)),
 ]
 
 
@@ -991,6 +1102,39 @@ cl_enemies = {}
 lobby_players = []
 net_notice = ""
 join_text = data.get("last_ip", "")
+code_text = ""
+code_msg = ""
+code_msg_col = (255, 235, 150)
+GOD_MONEY = 1000000
+
+
+def god_active():
+    """GODMODE sadece tek kisilik ve host oyunlarinda calisir (istemcide host belirler)."""
+    return bool(data.get("god")) and net_mode != "client"
+
+
+def apply_code():
+    global code_text, code_msg, code_msg_col
+    c = code_text.strip().upper()
+    if c == "ADMINTANKS":
+        if "admin" not in data["owned"]:
+            data["owned"].append("admin")
+        data["selected"] = "admin"
+        code_msg = "ADMIN TANK açıldı ve seçildi! (Dükkanda son sayfada)"
+        code_msg_col = (120, 255, 140)
+    elif c == "GODMODE":
+        data["god"] = not data.get("god", False)
+        if data["god"]:
+            data["money"] += GOD_MONEY
+            code_msg = f"GODMODE AÇIK: +{GOD_MONEY} $ ve ölümsüzlük (tek kişilik / host)"
+        else:
+            code_msg = "GODMODE KAPALI"
+        code_msg_col = (120, 255, 140)
+    elif c:
+        code_msg = "Geçersiz kod"
+        code_msg_col = (255, 110, 100)
+    code_text = ""
+    save_game()
 host_ips = []
 lobby_acc = 0.0
 net_acc = 0.0
@@ -1018,11 +1162,13 @@ def reset_game(roster=None):
     global need_release, run_money, paused_ui, my_pid
     if roster is None:
         my_pid = 0
-        roster = [[0, PLAYER_NAME, current_tank_id]]
+        roster = [[0, PLAYER_NAME, current_tank_id, tank_level(current_tank_id)]]
     players = []
     n = len(roster)
-    for i, (pid, name, tid) in enumerate(roster):
-        p = Player(TANK_BY_ID.get(tid, TANK_BY_ID["acemi"]), pid, name)
+    for i, row in enumerate(roster):
+        pid, name, tid = row[0], row[1], row[2]
+        lvl = row[3] if len(row) > 3 else 1
+        p = Player(TANK_BY_ID.get(tid, TANK_BY_ID["acemi"]), pid, name, lvl)
         p.x = W / 2 + (i - (n - 1) / 2) * 150
         p.tx = p.x
         players.append(p)
@@ -1144,9 +1290,9 @@ def start_hosting():
 
 
 def lobby_roster():
-    r = [[0, PLAYER_NAME, data["selected"]]]
+    r = [[0, PLAYER_NAME, data["selected"], tank_level(data["selected"])]]
     for pid in sorted(host.conns):
-        r.append([pid, host.info[pid]["name"], host.info[pid]["tank"]])
+        r.append([pid, host.info[pid]["name"], host.info[pid]["tank"], host.info[pid].get("lvl", 1)])
     return r
 
 
@@ -1163,8 +1309,12 @@ def handle_hello(conn, m):
     pid = free[0]
     tank = m.get("tank")
     host.conns[pid] = conn
+    try:
+        lvl = max(1, min(MAX_TANK_LEVEL, int(m.get("lvl", 1))))
+    except (TypeError, ValueError):
+        lvl = 1
     host.info[pid] = {"name": str(m.get("name", "Oyuncu"))[:12],
-                      "tank": tank if tank in TANK_BY_ID else "acemi"}
+                      "tank": tank if tank in TANK_BY_ID else "acemi", "lvl": lvl}
     conn.send({"t": "welcome", "pid": pid})
 
 
@@ -1289,7 +1439,8 @@ def check_connect():
         connect_info.update(status="idle", sock=None)
         client_conn = NetConn(sock)
         net_mode = "client"
-        client_conn.send({"t": "hello", "name": PLAYER_NAME, "tank": data["selected"], "ver": NET_VERSION})
+        client_conn.send({"t": "hello", "name": PLAYER_NAME, "tank": data["selected"], "ver": NET_VERSION,
+                          "lvl": tank_level(data["selected"])})
         lobby_players[:] = []
         net_notice = ""
         state = "lobby"
@@ -1336,9 +1487,10 @@ def begin_client_game(roster):
     global kills, kills_needed, paused_ui, need_release, shake, hurt, upgrade_t
     cl_players.clear()
     cl_enemies.clear()
-    for pid, name, tid in roster:
-        p = Player(TANK_BY_ID.get(tid, TANK_BY_ID["acemi"]), pid, name)
-        cl_players[pid] = p
+    for row in roster:
+        pid, name, tid = row[0], row[1], row[2]
+        lvl = row[3] if len(row) > 3 else 1
+        cl_players[pid] = Player(TANK_BY_ID.get(tid, TANK_BY_ID["acemi"]), pid, name, lvl)
     players = list(cl_players.values())
     player = cl_players.get(my_pid) or players[0]
     enemies, bullets = [], []
@@ -1473,23 +1625,69 @@ def client_send_input(inp):
                       "my": int(inp["my"]), "f": 1 if inp["f"] else 0})
 
 
+# Android icin iki sanal joystick: sol hareket, sag nisangah + surekli ates.
+TOUCH_MOVE_CENTER = (165, H - 165)
+TOUCH_AIM_CENTER = (W - 165, H - 165)
+TOUCH_STICK_RADIUS = 100
+touch_move_id = None
+touch_move_pos = TOUCH_MOVE_CENTER
+touch_aim_id = None
+touch_aim_pos = TOUCH_AIM_CENTER
+touch_aim_angle = -math.pi / 2
+
+
 def local_input(keys):
+    global touch_aim_angle
     if paused_ui:
         return {"dx": 0, "dy": 0, "mx": mouse_pos[0], "my": mouse_pos[1], "f": False}
+
     dx = int(bool(keys[pygame.K_d] or keys[pygame.K_RIGHT])) - int(bool(keys[pygame.K_a] or keys[pygame.K_LEFT]))
     dy = int(bool(keys[pygame.K_s] or keys[pygame.K_DOWN])) - int(bool(keys[pygame.K_w] or keys[pygame.K_UP]))
-    firing = (mouse_down and not need_release) or bool(keys[pygame.K_SPACE])
-    return {"dx": dx, "dy": dy, "mx": mouse_pos[0], "my": mouse_pos[1], "f": firing}
+    mx, my = mouse_pos
+
+    if ANDROID and touch_move_id is not None:
+        vx = (touch_move_pos[0] - TOUCH_MOVE_CENTER[0]) / TOUCH_STICK_RADIUS
+        vy = (touch_move_pos[1] - TOUCH_MOVE_CENTER[1]) / TOUCH_STICK_RADIUS
+        length = math.hypot(vx, vy)
+        if length < 0.12:
+            dx, dy = 0, 0
+        else:
+            if length > 1:
+                vx, vy = vx / length, vy / length
+            dx, dy = vx, vy
+
+    if ANDROID and touch_aim_id is not None:
+        ax = touch_aim_pos[0] - TOUCH_AIM_CENTER[0]
+        ay = touch_aim_pos[1] - TOUCH_AIM_CENTER[1]
+        if math.hypot(ax, ay) > 12:
+            touch_aim_angle = math.atan2(ay, ax)
+        # Oyuncunun konumundan bakis acisi yonunde sanal imlec noktasi.
+        if player is not None:
+            mx = player.x + math.cos(touch_aim_angle) * 600
+            my = player.y + math.sin(touch_aim_angle) * 600
+
+    if ANDROID:
+        firing = (touch_aim_id is not None) or bool(keys[pygame.K_SPACE])
+    else:
+        firing = (mouse_down and not need_release) or bool(keys[pygame.K_SPACE])
+    return {"dx": dx, "dy": dy, "mx": mx, "my": my, "f": firing}
 
 
 def do_action(act):
-    global state, need_release, paused_ui, net_notice
+    global state, need_release, paused_ui, net_notice, shop_page, code_text, code_msg
     if act == "continue":
         continue_run()
     elif act == "new":
         start_new_game()
     elif act == "shop":
         state = "shop"
+        shop_page = 0
+    elif act == "code":
+        code_text = ""
+        code_msg = ""
+        state = "code"
+    elif act == "do_code":
+        apply_code()
     elif act == "menu":
         go_menu()
     elif act == "quit":
@@ -1525,6 +1723,20 @@ def draw_text(text, f, color, center, shadow=True):
     screen.blit(img, img.get_rect(center=center))
 
 
+def wrap_text(text, f, max_w):
+    lines, cur = [], ""
+    for word in text.split():
+        t = (cur + " " + word).strip()
+        if f.size(t)[0] <= max_w:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
 def panel(rect, alpha=140):
     rect = tuple(int(v) for v in rect)
     s = pygame.Surface((rect[2], rect[3]), pygame.SRCALPHA)
@@ -1553,8 +1765,8 @@ def menu_buttons():
     if data["run"]:
         labels.append((f"Devam Et (Level {data['run']['level']})", "continue"))
     labels += [("Yeni Oyun (Tek Kişilik)", "new"), ("Çok Oyunculu", "mp"), ("Dükkan", "shop"),
-               ("Çıkış", "quit")]
-    return stack_buttons(labels, int(H * 0.50))
+               ("Kod Gir", "code"), ("Çıkış", "quit")]
+    return stack_buttons(labels, int(H * 0.46))
 
 
 def pause_buttons():
@@ -1572,6 +1784,10 @@ def over_buttons():
     if net_mode == "host":
         return stack_buttons([("Tekrar Oyna", "restart_mp"), ("Ana Menü", "menu")], H // 2 + 130)
     return stack_buttons([("Ana Menü", "menu")], H // 2 + 130)
+
+
+def code_buttons():
+    return stack_buttons([("Uygula", "do_code"), ("Geri", "menu")], int(H * 0.58))
 
 
 def mp_menu_buttons():
@@ -1598,6 +1814,8 @@ def current_buttons():
         return over_buttons()
     if state == "mp_menu":
         return mp_menu_buttons()
+    if state == "code":
+        return code_buttons()
     if state == "mp_join":
         return join_buttons()
     if state == "lobby":
@@ -1630,6 +1848,39 @@ def fmt_time(t):
 
 
 # ---------------- dukkan ----------------
+SHOP_PAGE_SIZE = 8
+shop_page = 0
+
+
+def tank_level(tid):
+    try:
+        return max(1, min(MAX_TANK_LEVEL, int(data["levels"].get(tid, 1))))
+    except (TypeError, ValueError):
+        return 1
+
+
+def upgrade_cost(t, lvl):
+    return int(max(300, t["price"]) * 0.5 * lvl)
+
+
+def leveled_stats(t, lvl):
+    """Tank seviyesine gore temel degerler: her seviye +%10 can, +%8 hasar, +%3 hiz, -%3 atis suresi."""
+    k = lvl - 1
+    return {"hp": t["hp"] * (1 + 0.10 * k), "dmg": t["dmg"] * (1 + 0.08 * k),
+            "speed": t["speed"] * (1 + 0.03 * k), "cooldown": t["cooldown"] * (0.97 ** k)}
+
+
+def shop_tanks():
+    lst = list(TANKS)
+    if "admin" in data["owned"]:
+        lst.append(ADMIN_TANK)
+    return lst
+
+
+def shop_page_count():
+    return max(1, (len(shop_tanks()) + SHOP_PAGE_SIZE - 1) // SHOP_PAGE_SIZE)
+
+
 def shop_layout():
     cols = 4
     gap = 20
@@ -1638,18 +1889,43 @@ def shop_layout():
     ch = max(270, min(380, (avail - gap) // 2))
     total_w = cols * cw + gap * (cols - 1)
     x0 = (W - total_w) // 2
+    tanks = shop_tanks()[shop_page * SHOP_PAGE_SIZE:(shop_page + 1) * SHOP_PAGE_SIZE]
     rects = []
-    for i in range(len(TANKS)):
+    for i in range(len(tanks)):
         row, col = divmod(i, cols)
         rects.append(pygame.Rect(x0 + col * (cw + gap), 125 + row * (ch + gap), cw, ch))
     back = pygame.Rect(W // 2 - 120, H - 68, 240, 52)
-    return rects, back
+    prev_b = pygame.Rect(W // 2 - 460, H - 68, 170, 52)
+    next_b = pygame.Rect(W // 2 + 290, H - 68, 170, 52)
+    return rects, back, prev_b, next_b, tanks
 
 
-def shop_click(i):
+def shop_card_buttons(r, owned):
+    y, h = r.bottom - 44, 32
+    if owned:
+        main = pygame.Rect(r.x + 16, y, int((r.width - 40) * 0.5), h)
+        up = pygame.Rect(main.right + 8, y, r.width - 32 - main.width - 8, h)
+        return main, up
+    return pygame.Rect(r.x + 16, y, r.width - 32, h), None
+
+
+def shop_action(t, which):
     global shop_msg, shop_msg_t
-    t = TANKS[i]
-    if t["id"] in data["owned"]:
+    owned = t["id"] in data["owned"]
+    if which == "up" and owned:
+        lvl = tank_level(t["id"])
+        if t["id"] == "admin" or lvl >= MAX_TANK_LEVEL:
+            shop_msg = f"{t['name']} zaten en yüksek seviyede"
+        else:
+            cost = upgrade_cost(t, lvl)
+            if data["money"] >= cost:
+                data["money"] -= cost
+                data["levels"][t["id"]] = lvl + 1
+                shop_msg = f"{t['name']} seviye {lvl + 1} oldu!"
+                save_game()
+            else:
+                shop_msg = f"Yetersiz para! {cost - data['money']} $ daha lazım"
+    elif owned:
         data["selected"] = t["id"]
         shop_msg = f"{t['name']} seçildi (yeni oyunda kullanılır)"
         save_game()
@@ -1669,17 +1945,27 @@ def draw_bar(x, y, w, frac, color):
     pygame.draw.rect(screen, color, (x, y, max(3, w * clamp(frac, 0, 1)), 8), border_radius=4)
 
 
+def draw_small_button(rect, label, color):
+    fill = shade(color, 1.25) if rect.collidepoint(mouse_pos) else color
+    pygame.draw.rect(screen, fill, rect, border_radius=10)
+    pygame.draw.rect(screen, shade(fill, 1.6), rect, 2, border_radius=10)
+    draw_text(label, micro, (255, 255, 255), rect.center, shadow=False)
+
+
 def draw_shop():
     screen.blit(background, (0, 0))
     screen.blit(veil_dark, (0, 0))
     screen.blit(vignette, (0, 0))
     draw_text("DÜKKAN", big, (255, 235, 150), (W // 2, 52))
     draw_text(f"Para: {data['money']} $", mid, (255, 215, 80), (W - 190, 52))
-    rects, back = shop_layout()
+    rects, back, prev_b, next_b, tanks = shop_layout()
     t_now = pygame.time.get_ticks() / 1000
-    for i, (r, tk) in enumerate(zip(rects, TANKS)):
+    for i, (r, tk) in enumerate(zip(rects, tanks)):
         owned = tk["id"] in data["owned"]
         selected = data["selected"] == tk["id"]
+        is_admin = tk["id"] == "admin"
+        lv = 1 if is_admin else tank_level(tk["id"])
+        ls = leveled_stats(tk, lv)
         hover = r.collidepoint(mouse_pos)
         fill = (44, 66, 50) if hover else (28, 40, 32)
         pygame.draw.rect(screen, fill, r, border_radius=16)
@@ -1692,20 +1978,21 @@ def draw_shop():
         draw_tank(screen, cx, cy, -0.4 + math.sin(t_now * 0.7 + i) * 0.25, ta, tk["spec"], sc,
                   0, 0, t_now * 25)
 
-        draw_text(tk["name"], name_font, (255, 255, 255), (r.centerx, r.y + int(r.height * 0.45)))
+        title = tk["name"] + (f"  Sv.{lv}" if owned and not is_admin else "")
+        draw_text(title, name_font, (255, 255, 255), (r.centerx, r.y + int(r.height * 0.45)))
         draw_text(tk["desc"], micro, (200, 215, 200), (r.centerx, r.y + int(r.height * 0.53)), shadow=False)
 
-        stats = [("Can", tk["hp"] / 260, (110, 220, 120)),
-                 ("Hız", tk["speed"] / 340, (90, 200, 255)),
-                 ("Hasar", tk["dmg"] / 70, (240, 90, 80)),
-                 ("Atış", (1 / tk["cooldown"]) / 4.6, (255, 200, 70))]
+        stats = [("Can", ls["hp"] / 450, (110, 220, 120)),
+                 ("Hız", ls["speed"] / 420, (90, 200, 255)),
+                 ("Hasar", ls["dmg"] / 110, (240, 90, 80)),
+                 ("Atış", (1 / ls["cooldown"]) / 5.0, (255, 200, 70))]
         sy = r.y + int(r.height * 0.60)
         for k, (lab, frac, col) in enumerate(stats):
             yy = sy + k * 15
             screen.blit(micro.render(lab, True, (220, 225, 220)), (r.x + 16, yy - 3))
             draw_bar(r.x + 74, yy, r.width - 94, frac, col)
 
-        br = pygame.Rect(r.x + 16, r.bottom - 44, r.width - 32, 32)
+        main_btn, up_btn = shop_card_buttons(r, owned)
         if selected:
             label, bcol = "SEÇİLİ", (160, 130, 30)
         elif owned:
@@ -1714,11 +2001,26 @@ def draw_shop():
             label, bcol = f"SATIN AL  {tk['price']} $", (40, 120, 150)
         else:
             label, bcol = f"{tk['price']} $", (110, 60, 60)
-        bfill = shade(bcol, 1.25) if br.collidepoint(mouse_pos) else bcol
-        pygame.draw.rect(screen, bfill, br, border_radius=10)
-        pygame.draw.rect(screen, shade(bfill, 1.6), br, 2, border_radius=10)
-        draw_text(label, tiny, (255, 255, 255), br.center, shadow=False)
+        if owned:
+            draw_small_button(main_btn, label, bcol)
+        else:
+            bfill = shade(bcol, 1.25) if main_btn.collidepoint(mouse_pos) else bcol
+            pygame.draw.rect(screen, bfill, main_btn, border_radius=10)
+            pygame.draw.rect(screen, shade(bfill, 1.6), main_btn, 2, border_radius=10)
+            draw_text(label, tiny, (255, 255, 255), main_btn.center, shadow=False)
+        if up_btn is not None:
+            if is_admin or lv >= MAX_TANK_LEVEL:
+                draw_small_button(up_btn, "MAKS", (90, 90, 96))
+            else:
+                cost = upgrade_cost(tk, lv)
+                afford = data["money"] >= cost
+                draw_small_button(up_btn, f"Yükselt {cost} $", (150, 100, 30) if afford else (100, 60, 60))
 
+    pages = shop_page_count()
+    if pages > 1:
+        draw_text(f"Sayfa {shop_page + 1} / {pages}", tiny, (230, 230, 230), (W // 2, H - 92))
+        draw_button(prev_b, "Önceki", prev_b.collidepoint(mouse_pos), color=(60, 80, 110))
+        draw_button(next_b, "Sonraki", next_b.collidepoint(mouse_pos), color=(60, 80, 110))
     draw_button(back, "Geri", back.collidepoint(mouse_pos))
     if shop_msg_t > 0:
         draw_text(shop_msg, tiny, (255, 235, 150), (W // 2, 108))
@@ -1754,6 +2056,47 @@ def draw_backdrop():
     screen.blit(background, (0, 0))
     screen.blit(veil_dark, (0, 0))
     screen.blit(vignette, (0, 0))
+
+
+def draw_touch_controls():
+    """Android yatay ekraninda iki sanal joystick cizer."""
+    lx, ly = TOUCH_MOVE_CENTER
+    rx, ry = TOUCH_AIM_CENTER
+    radius = TOUCH_STICK_RADIUS
+
+    pygame.draw.circle(screen, (23, 31, 31), (lx, ly), radius)
+    pygame.draw.circle(screen, (108, 135, 124), (lx, ly), radius, 4)
+    pygame.draw.circle(screen, (63, 83, 76), (lx, ly), 48, 2)
+    move_knob = touch_move_pos if touch_move_id is not None else TOUCH_MOVE_CENTER
+    pygame.draw.circle(screen, (57, 110, 91), (int(move_knob[0]), int(move_knob[1])), 35)
+    pygame.draw.circle(screen, (195, 225, 207), (int(move_knob[0]), int(move_knob[1])), 35, 3)
+
+    pygame.draw.circle(screen, (23, 31, 31), (rx, ry), radius)
+    pygame.draw.circle(screen, (126, 118, 83), (rx, ry), radius, 4)
+    pygame.draw.circle(screen, (83, 73, 51), (rx, ry), 48, 2)
+    aim_knob = touch_aim_pos if touch_aim_id is not None else TOUCH_AIM_CENTER
+    pygame.draw.circle(screen, (143, 99, 43), (int(aim_knob[0]), int(aim_knob[1])), 35)
+    pygame.draw.circle(screen, (255, 222, 150), (int(aim_knob[0]), int(aim_knob[1])), 35, 3)
+
+    label_l = micro.render("HAREKET", True, (235, 245, 235))
+    label_r = micro.render("NISAN + ATES", True, (255, 235, 190))
+    screen.blit(label_l, (lx - label_l.get_width() // 2, ly - radius - 27))
+    screen.blit(label_r, (rx - label_r.get_width() // 2, ry - radius - 27))
+
+
+def draw_code():
+    draw_backdrop()
+    draw_text("KOD BÖLÜMÜ", big, (255, 235, 150), (W // 2, int(H * 0.14)))
+    draw_text("Gizli kodu yaz ve Enter'a bas", mid, (230, 235, 230), (W // 2, int(H * 0.28)), shadow=False)
+    box = pygame.Rect(W // 2 - 300, int(H * 0.36), 600, 70)
+    pygame.draw.rect(screen, (20, 28, 22), box, border_radius=14)
+    pygame.draw.rect(screen, (190, 240, 200), box, 3, border_radius=14)
+    caret = "|" if (pygame.time.get_ticks() // 500) % 2 == 0 else " "
+    draw_text(code_text + caret, mid, (255, 255, 255), box.center, shadow=False)
+    if code_msg:
+        draw_text(code_msg, tiny, code_msg_col, (W // 2, int(H * 0.50)))
+    for lab, act, r in code_buttons():
+        draw_button(r, lab, r.collidepoint(mouse_pos), color=(56, 108, 70) if act != "menu" else (110, 60, 60))
 
 
 def draw_mp_menu():
@@ -1811,8 +2154,8 @@ def draw_lobby():
     draw_text(f"Oyuncular ({len(roster)}/{MAX_PLAYERS})", mid, (255, 255, 255), (W // 2, int(H * 0.42)))
     for i, row in enumerate(roster):
         try:
-            pid, name, tid = row
-        except (TypeError, ValueError):
+            pid, name, tid = row[0], row[1], row[2]
+        except (TypeError, ValueError, IndexError):
             continue
         col = PLAYER_COLORS[pid % len(PLAYER_COLORS)]
         tname = TANK_BY_ID.get(tid, TANK_BY_ID["acemi"])["name"]
@@ -1825,7 +2168,7 @@ def draw_lobby():
 
 
 def handle_click(pos):
-    global new_pc_notice
+    global new_pc_notice, shop_page
     if state == "menu":
         new_pc_notice = False
     if state == "upgrade":
@@ -1834,13 +2177,25 @@ def handle_click(pos):
                 choose(i)
                 return
     elif state == "shop":
-        rects, back = shop_layout()
+        rects, back, prev_b, next_b, tanks = shop_layout()
         if back.collidepoint(pos):
             go_menu_from_shop()
             return
-        for i, r in enumerate(rects):
+        pages = shop_page_count()
+        if pages > 1 and prev_b.collidepoint(pos):
+            shop_page = (shop_page - 1) % pages
+            return
+        if pages > 1 and next_b.collidepoint(pos):
+            shop_page = (shop_page + 1) % pages
+            return
+        for r, tk in zip(rects, tanks):
             if r.collidepoint(pos):
-                shop_click(i)
+                owned = tk["id"] in data["owned"]
+                _main, up_btn = shop_card_buttons(r, owned)
+                if up_btn is not None and up_btn.collidepoint(pos):
+                    shop_action(tk, "up")
+                else:
+                    shop_action(tk, "main")
                 return
     else:
         for lab, act, r in current_buttons():
@@ -1859,7 +2214,17 @@ JOIN_CHARS = set("0123456789.:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX
 
 
 def handle_key(key, uni=""):
-    global state, need_release, paused_ui, join_text
+    global state, need_release, paused_ui, join_text, code_text
+    if state == "code":
+        if key == pygame.K_ESCAPE:
+            state = "menu"
+        elif key == pygame.K_RETURN:
+            apply_code()
+        elif key == pygame.K_BACKSPACE:
+            code_text = code_text[:-1]
+        elif uni and uni.isalnum() and len(code_text) < 20:
+            code_text += uni.upper()
+        return
     if state == "mp_join":
         if key == pygame.K_ESCAPE:
             state = "mp_menu"
@@ -1899,17 +2264,46 @@ mouse_down = False
 while running:
     dt = min(clock.tick(60) / 1000, 0.05)
     mouse_pos = to_logical(pygame.mouse.get_pos())
-    mouse_down = pygame.mouse.get_pressed()[0]
+    mouse_down = False if ANDROID else pygame.mouse.get_pressed()[0]
     if not mouse_down:
         need_release = False
 
     for e in pygame.event.get():
         if e.type == pygame.QUIT:
             quit_game()
+        elif ANDROID and e.type == pygame.FINGERDOWN:
+            if state == "play" and not paused_ui:
+                pos = to_logical((int(e.x * SW), int(e.y * SH)))
+                if pos[0] < W * 0.46 and pos[1] > H * 0.42 and touch_move_id is None:
+                    touch_move_id = e.finger_id
+                    touch_move_pos = pos
+                elif pos[0] > W * 0.54 and pos[1] > H * 0.42 and touch_aim_id is None:
+                    touch_aim_id = e.finger_id
+                    touch_aim_pos = pos
+                    ax = pos[0] - TOUCH_AIM_CENTER[0]
+                    ay = pos[1] - TOUCH_AIM_CENTER[1]
+                    if math.hypot(ax, ay) > 12:
+                        touch_aim_angle = math.atan2(ay, ax)
+        elif ANDROID and e.type == pygame.FINGERMOTION:
+            pos = to_logical((int(e.x * SW), int(e.y * SH)))
+            if e.finger_id == touch_move_id:
+                touch_move_pos = pos
+            elif e.finger_id == touch_aim_id:
+                touch_aim_pos = pos
+        elif ANDROID and e.type == pygame.FINGERUP:
+            if e.finger_id == touch_move_id:
+                touch_move_id = None
+                touch_move_pos = TOUCH_MOVE_CENTER
+            if e.finger_id == touch_aim_id:
+                touch_aim_id = None
+                touch_aim_pos = TOUCH_AIM_CENTER
         elif e.type == pygame.KEYDOWN:
             handle_key(e.key, getattr(e, "unicode", ""))
         elif e.type == pygame.MOUSEBUTTONDOWN and e.button == 1:
-            handle_click(to_logical(e.pos))
+            # Oyun sirasinda Android dokunuslari joystick ile islenir;
+            # menulerde SDL'nin dokunma -> fare tiklamasi eslemesi kullanilir.
+            if not (ANDROID and state == "play" and not paused_ui):
+                handle_click(to_logical(e.pos))
 
     want_cursor = not (state == "play" and not paused_ui)
     if want_cursor != cursor_visible:
@@ -1942,6 +2336,18 @@ while running:
         for p in players:
             if p.hp > 0:
                 p.update(dt, p.inp, bullets)
+        for p in players:                                     # Sok Dalgasi
+            if p.hp > 0 and p.shock > 0:
+                p.shock_t -= dt
+                if p.shock_t <= 0:
+                    p.shock_t = max(1.5, 5.0 - 0.8 * p.shock)
+                    rad = 200 + 40 * p.shock
+                    for en in enemies:
+                        if math.hypot(en.x - p.x, en.y - p.y) < rad + en.r:
+                            en.hp -= p.dmg * 1.5
+                            en.flash = 0.1
+                            en.last_pid = p.pid
+                    fx_sparks(p.x, p.y, (120, 200, 255), 30, 420, 0.4)
         banner = max(0, banner - dt)
         boss_lvl = is_boss_level(level)
         power = get_power()
@@ -1961,6 +2367,11 @@ while running:
 
         for en in enemies:
             en.update(dt, players, bullets)
+            if en.burn_t > 0:                                 # Yanici Mermi: surekli hasar
+                en.burn_t -= dt
+                en.hp -= en.burn_dps * dt
+                if random.random() < 0.2:
+                    spawn_sparks(en.x, en.y, (255, 140, 50), 1, 60, 0.3)
 
         # tanklar ust uste binmesin (birbirlerine zarar vermezler)
         for i, a in enumerate(enemies):
@@ -1975,18 +2386,41 @@ while running:
                     b.x += ddx / d * push
                     b.y += ddy / d * push
 
+        pmap = {p.pid: p for p in players}
         for b in bullets:
             b.update(dt)
             if b.life <= 0:
                 continue
             if b.owner == "player":
                 for en in enemies:
+                    if en.eid in b.hit_ids:
+                        continue
                     if math.hypot(b.x - en.x, b.y - en.y) < en.r + b.r:
                         en.hp -= b.dmg
                         en.flash = 0.1
                         en.last_pid = b.pid
                         fx_sparks(b.x, b.y, (255, 235, 150), 5, 170, 0.25)
-                        b.life = 0
+                        if b.lifesteal > 0:                       # Can Calma
+                            shooter = pmap.get(b.pid)
+                            if shooter is not None and shooter.hp > 0:
+                                shooter.hp = min(shooter.max_hp, shooter.hp + b.dmg * b.lifesteal)
+                        if b.splash > 0:                          # Patlayici Mermi
+                            for other in enemies:
+                                if other is not en and math.hypot(other.x - b.x, other.y - b.y) < 110 + other.r:
+                                    other.hp -= b.dmg * b.splash
+                                    other.flash = 0.1
+                                    other.last_pid = b.pid
+                            fx_sparks(b.x, b.y, (255, 150, 60), 14, 260, 0.35)
+                        if b.slow > 0:                            # Yavaslatici Mermi
+                            en.slow_t = 1.0 + 0.5 * b.slow
+                        if b.burn > 0:                            # Yanici Mermi
+                            en.burn_t = 3.0
+                            en.burn_dps = max(en.burn_dps, b.dmg * 0.25 * b.burn)
+                        if b.pierce > 0:                          # Delici Mermi
+                            b.pierce -= 1
+                            b.hit_ids.add(en.eid)
+                        else:
+                            b.life = 0
                         break
             else:
                 for p in players:
@@ -2002,6 +2436,9 @@ while running:
                 fx_explosion(en.x, en.y, 2.2 if en.boss else 1.0, 46 * en.scale)
                 fx_shake(0.9 if en.boss else 0.3)
                 reward = int(150 + level * 15) if en.boss else int(5 + level * 2)
+                killer = pmap.get(en.last_pid)
+                if killer is not None and killer.gold > 0:       # Altin Avcisi
+                    reward = int(reward * (1 + killer.gold))
                 if en.last_pid == my_pid:
                     data["money"] += reward
                     run_money += reward
@@ -2093,6 +2530,8 @@ while running:
         draw_shop()
     elif state == "mp_menu":
         draw_mp_menu()
+    elif state == "code":
+        draw_code()
     elif state == "mp_join":
         draw_join()
     elif state == "lobby":
@@ -2163,6 +2602,8 @@ while running:
         st_img = tiny.render(stats, True, (235, 235, 235))
         panel((14, H - 46, st_img.get_width() + 28, 34))
         screen.blit(st_img, (28, H - 39))
+        if god_active():
+            draw_text("GODMODE AÇIK", tiny, (255, 215, 80), (W // 2, H - 30))
 
         for en in enemies:
             if en.boss:
@@ -2207,7 +2648,8 @@ while running:
                 ball(screen, r.centerx, r.y + 62, 30, opt[4])
                 draw_text(f"[{i + 1}]", tiny, (255, 255, 130), (r.x + 28, r.y + 22))
                 draw_text(opt[0], mid, (255, 255, 255), (r.centerx, r.y + 135))
-                draw_text(opt[1], small, (215, 232, 215), (r.centerx, r.y + 195), shadow=False)
+                for li, ln in enumerate(wrap_text(opt[1], small, r.width - 40)):
+                    draw_text(ln, small, (215, 232, 215), (r.centerx, r.y + 185 + li * 24), shadow=False)
 
         if state == "play" and paused_ui:
             screen.blit(veil_dark, (0, 0))
@@ -2230,7 +2672,7 @@ while running:
             for lab, act, r in over_buttons():
                 draw_button(r, lab, r.collidepoint(mouse_pos))
 
-        if state == "play" and not paused_ui:
+        if state == "play" and not paused_ui and not ANDROID:
             mx, my = mouse_pos
             pygame.draw.circle(screen, (0, 0, 0), (int(mx), int(my)), 16, 4)
             pygame.draw.circle(screen, (255, 255, 255), (int(mx), int(my)), 15, 2)
@@ -2239,6 +2681,8 @@ while running:
                                  (mx + ddx * 22, my + ddy * 22), 2)
             pygame.draw.circle(screen, (255, 70, 70), (int(mx), int(my)), 3)
 
+    if ANDROID and state == "play" and not paused_ui:
+        draw_touch_controls()
     present()
 
 pygame.quit()
