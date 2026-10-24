@@ -14,16 +14,17 @@ orientation = landscape
 fullscreen = 1
 
 # Android icin pygame'in python-for-android recetesi kullanilir.
-requirements = python3==3.11.9,hostpython3==3.11.9,pygame
+requirements = python3,pygame
 p4a.bootstrap = sdl2
 p4a.branch = develop
 
 # Cok oyunculu LAN/TCP baglantisi icin.
 android.permissions = INTERNET,ACCESS_NETWORK_STATE
 android.minapi = 23
-android.api = 36
+android.api = 33
 android.archs = arm64-v8a, armeabi-v7a
 android.accept_sdk_license = True
+android.ndk = 25b
 
 # Derlemeyi daha anlasilir tut.
 
